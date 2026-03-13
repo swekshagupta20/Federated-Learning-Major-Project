@@ -10,11 +10,29 @@ from torch.utils.data import DataLoader
 net = Net()
 
 # 2. Load Data (Simulating one client's data)
-def load_data():
+def load_data(partition_id: int = 0, num_partitions: int = 10):
+    """
+    Load CIFAR-10 data. 
+    partition_id: The specific index for this client.
+    num_partitions: Total number of clients in the simulation.
+    """
     trf = Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    
+    # Download the full datasets
     trainset = CIFAR10("./data", train=True, download=True, transform=trf)
     testset = CIFAR10("./data", train=False, download=True, transform=trf)
-    return DataLoader(trainset, batch_size=32, shuffle=True), DataLoader(testset)
+
+    # PLACEHOLDER FOR PARTNER'S LOGIC:
+    # This is where we will apply the Dirichlet indices later.
+    # For now, it just splits the data evenly (IID).
+    partition_size = len(trainset) // num_partitions
+    lengths = [partition_size] * num_partitions
+    datasets = torch.utils.data.random_split(trainset, lengths, generator=torch.Generator().manual_seed(42))
+
+    # Select the specific partition for this client
+    ds = datasets[partition_id]
+    
+    return DataLoader(ds, batch_size=32, shuffle=True), DataLoader(testset)
 
 trainloader, testloader = load_data()
 
