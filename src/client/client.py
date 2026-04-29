@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 import json
 import torch
 import flwr as fl
@@ -8,39 +8,68 @@ from torchvision.datasets import CIFAR10
 from torchvision.transforms import Compose, ToTensor, Normalize
 from torch.utils.data import DataLoader, Subset
 
-# 1. Path Setup: Ensure the root directory is in sys.path
-current_file_path = os.path.abspath(__file__)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file_path)))
-if project_root not in sys.path:
-    sys.path.append(project_root)
+# ---------------------------------------------------
+# PATH SETUP
+# ---------------------------------------------------
 
-# Now internal imports will work perfectly
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "../../"))
+
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+# ---------------------------------------------------
+# IMPORTS
+# ---------------------------------------------------
+
 from src.models.cnn import Net, train, test
-from src.utils.hardware_sim import HardwareManager
+from src.simulation.hardware_sim import HardwareManager
 
-# Path to the shared metadata
-METADATA_PATH = os.path.join(project_root, 'data', 'partition_metadata.json')
+METADATA_PATH = os.path.join(PROJECT_ROOT, "data", "partition_metadata.json")
+
+
+# ---------------------------------------------------
+# LOAD DATA (Non-IID)
+# ---------------------------------------------------
 
 def load_data(client_id: int):
-    trf = Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-    trainset = CIFAR10("./data", train=True, download=True, transform=trf)
-    testset = CIFAR10("./data", train=False, download=True, transform=trf)
+    transform = Compose([
+        ToTensor(),
+        Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
 
-    with open(METADATA_PATH, 'r') as f:
+    trainset = CIFAR10("./data", train=True, download=True, transform=transform)
+    testset = CIFAR10("./data", train=False, download=True, transform=transform)
+
+    with open(METADATA_PATH, "r") as f:
         metadata = json.load(f)
-    
-    # Extract indices for this client
-    client_indices = metadata[str(client_id)]['indices']
-    train_shard = Subset(trainset, client_indices)
-    
-    return DataLoader(train_shard, batch_size=32, shuffle=True), DataLoader(testset, batch_size=32)
+
+    indices = metadata[str(client_id)]["indices"]
+    train_subset = Subset(trainset, indices)
+
+    trainloader = DataLoader(train_subset, batch_size=32, shuffle=True)
+    testloader = DataLoader(testset, batch_size=32)
+
+    return trainloader, testloader
+
+
+# ---------------------------------------------------
+# FLOWER CLIENT
+# ---------------------------------------------------
 
 class FlowerClient(fl.client.NumPyClient):
-    def __init__(self, client_id):
+    def __init__(self, client_id: int):
         self.client_id = client_id
-        self.hardware = HardwareManager() # Phase 2: Sensor link
-        self.trainloader, self.testloader = load_data(client_id)
+        self.device = "cpu"
+
         self.net = Net()
+        self.trainloader, self.testloader = load_data(client_id)
+
+        self.hardware = HardwareManager()
+
+    # ------------------------------
+    # PARAMETERS
+    # ------------------------------
 
     def get_parameters(self, config):
         return [val.cpu().numpy() for _, val in self.net.state_dict().items()]
@@ -50,30 +79,64 @@ class FlowerClient(fl.client.NumPyClient):
         state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
         self.net.load_state_dict(state_dict, strict=True)
 
+    # ------------------------------
+    # TRAINING
+    # ------------------------------
+
     def fit(self, parameters, config):
         self.set_parameters(parameters)
-        
-        # --- Phase 2: Hardware Reporting ---
-        stats = self.hardware.get_sensor_data(self.client_id)
-        print(f"\n[CLIENT {self.client_id}] Status -> Battery: {stats[0]}% | Latency: {stats[1]}ms")
-        
-        train(self.net, self.trainloader, epochs=1)
-        
-        # --- Phase 2: Battery Consumption ---
+
+        # 🔥 Simulate network changes
+        self.hardware.simulate_network(self.client_id)
+
+        # 🔥 Check dropout (VERY IMPORTANT)
+        if not self.hardware.is_available(self.client_id):
+            print(f"[CLIENT {self.client_id}] ❌ DROPPED OUT")
+            return [], 0, {}
+
+        # Get hardware state
+        battery, latency, reliability = self.hardware.get_sensor_data(self.client_id)
+
+        print(f"\n[CLIENT {self.client_id}]")
+        print(f"Battery: {battery:.2f}% | Latency: {latency:.2f} ms | Reliability: {reliability:.2f}")
+
+        # Train
+        train(self.net, self.trainloader, epochs=1, device=self.device)
+
+        # Simulate battery drain
         self.hardware.simulate_drain(self.client_id, energy_cost=5.0)
-        print(f"[CLIENT {self.client_id}] Training complete. Energy consumed.")
-        
+
+        # Return update
         return self.get_parameters(config={}), len(self.trainloader.dataset), {
-            "battery": stats[0],
-            "latency": stats[1]
+            "battery": battery,
+            "latency": latency,
+            "reliability": reliability
         }
+
+    # ------------------------------
+    # EVALUATION
+    # ------------------------------
 
     def evaluate(self, parameters, config):
         self.set_parameters(parameters)
-        loss, accuracy = test(self.net, self.testloader)
-        return loss, len(self.testloader.dataset), {"accuracy": accuracy}
+
+        loss, accuracy = test(self.net, self.testloader, device=self.device)
+
+        return loss, len(self.testloader.dataset), {
+            "accuracy": accuracy
+        }
+
+
+# ---------------------------------------------------
+# START CLIENT
+# ---------------------------------------------------
 
 if __name__ == "__main__":
-    import sys
     cid = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-    fl.client.start_client(server_address="127.0.0.1:8080", client=FlowerClient(client_id=cid).to_client())
+
+    print(f"[STARTING CLIENT {cid}]")
+
+    fl.client.start_client(
+        server_address="127.0.0.1:8080",
+        client=FlowerClient(client_id=cid).to_client(),
+    )

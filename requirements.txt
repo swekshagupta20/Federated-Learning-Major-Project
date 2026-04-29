@@ -1,0 +1,26 @@
+# Core ML & DL
+torch
+torchvision
+
+# Federated Learning
+flwr
+
+# RL (for your DRL orchestrator)
+stable-baselines3
+gymnasium
+
+# Data handling
+numpy
+pandas
+
+# Visualization & Monitoring
+matplotlib
+tensorboard
+
+# Dashboard (Phase 2/3)
+streamlit
+
+# Utilities
+tqdm
+scikit-learn
+pyyaml

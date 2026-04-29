@@ -1,0 +1,38 @@
+SE-FL-Project/
+│
+├── data/
+│   ├── partition_data.py
+│   ├── partition_metadata.json
+│
+├── src/
+│   ├── models/
+│   │   └── cnn.py
+│
+│   ├── client/
+│   │   └── client.py
+│
+│   ├── server/
+│   │   └── server.py
+│
+│   ├── strategy/
+│   │   └── rl_weighted.py
+│
+│   ├── simulation/
+│   │   └── hardware_sim.py
+│
+│   ├── rl/
+│   │   ├── agent.py
+│   │   └── environment.py
+│
+│   ├── utils/
+│   │   ├── metrics.py
+│   │   └── plots.py
+│
+├── dashboard/
+│   └── monitor.py
+│
+├── config/
+│   └── config.yaml
+│
+├── requirements.txt
+└── README.md
