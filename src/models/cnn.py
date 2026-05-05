@@ -8,7 +8,7 @@ class Net(nn.Module):
         # Layer 1: Takes an image, looks for simple shapes
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)
-        # Layer 2: Looks for more complex features
+        # Layer 2: Looks for more complex features-
         self.conv2 = nn.Conv2d(6, 16, 5)
         # Final Layers: Decides the category (10 categories for CIFAR-10)
         self.fc1 = nn.Linear(16 * 5 * 5, 120)
